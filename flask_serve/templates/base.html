@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %} {% endblock %}</title>
+    <style>
+        nav a {
+            color: #5555aa;
+            font-size: 2em;
+            margin-left: 50px;
+            text-decoration: none;
+        }
+    </style>
+    {% if wait_for_downlaod is defined and variable %}
+        <meta http-equiv="refresh" content="15">
+    {% endif %}
+</head>
+<body>
+    <nav>
+        <a href="{{ url_for('gen_tray_form') }}">STL Generator</a>
+    </nav>
+    <hr>
+    <div class="content">
+        {% block content %} {% endblock %}
+    </div>
+</body>
+</html>

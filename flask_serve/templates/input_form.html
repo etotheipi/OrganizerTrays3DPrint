@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block content %}
+    <h1>{% block title %} Generate Custom Organizer Tray (.stl) {% endblock %}</h1>
+
+    <form method="POST" action="/gentray">
+        {{ form.csrf_token }}
+        <p>
+            {{ form.binary_mm_or_in.label }}
+            {{ form.binary_mm_or_in(size=14) }}
+        </p>
+
+        {% if form.binary_mm_or_in.errors %}
+            <ul class="errors">
+                {% for error in form.binary_mm_or_in.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            {{ form.x_list.label }}
+            {{ form.x_list(size=14) }}
+        </p>
+
+        {% if form.x_list.errors %}
+            <ul class="errors">
+                {% for error in form.x_list.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            {{ form.y_list.label }}
+            {{ form.y_list(size=14) }}
+        </p>
+
+        {% if form.y_list.errors %}
+        <ul class="errors">
+            {% for error in form.y_list.errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <p>
+            {{ form.wall_thickness.label }}
+            {{ form.wall_thickness(size=8) }}
+        </p>
+
+        {% if form.wall_thickness.errors %}
+            <ul class="errors">
+                {% for error in form.wall_thickness.errors %}
+                    <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+
+        <p>
+            {{ form.tray_depth.label }}
+            {{ form.tray_depth(size=8) }}
+        </p>
+
+        {% if form.tray_depth.errors %}
+        <ul class="errors">
+            {% for error in form.tray_depth.errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <p>
+            {{ form.floor_round.label }}
+            {{ form.floor_round(size=8) }}
+        </p>
+
+        {% if form.floor_round.errors %}
+        <ul class="errors">
+            {% for error in form.floor_round.errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        <p>
+            <input type="submit" name="preview_only" value="Preview" />
+        </p>
+
+    </form>
+
+    {% if preview %}
+    <form method="POST" action="/gen_download_stl">
+            <hr>
+            <h1>Tray Preview</h1>
+            <img src="data:image/png;base64,{{ preview_b64 }}" alt="Tray Sizing Preview" />
+
+            <hr>
+
+            Press the button below to to have this server generate the STL for you:
+            <p>
+                <input type="submit" name="generate_stl" value="Generate STL" />
+            </p>
+
+            Alternatively, if you have a local environment (or Docker) capable of running these scripts, you can use one of the following commands to generate the STL file on your own system:
+            <p>
+
+            </p>
+
+            <ul>
+                <li><b>Docker (will automatically download):</b> <pre>{{ docker_cmd }}</pre></li>
+                <li><b>Local Python Env (<a href="https://github.com/etotheipi/OrganizerTrays3DPrint">clone or download from github</a>):</b> <pre>{{ local_cmd }}</pre></li>
+            </ul>
+
+            </p>
+
+    </form>
+   {% endif %}
+
+
+{% endblock %}
