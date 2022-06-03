@@ -35,15 +35,20 @@ Type the following to see all options:
 
                 
 """
+import io
+
 from solid import *
 from solid.utils import *
 from ast import literal_eval
 from math import sqrt, pi
+from hashlib import sha256
 import os
+import io
 import time
 import sys
 import argparse
 import subprocess
+import tempfile
 
 xScale = 1.0
 yScale = 1.0
@@ -57,16 +62,16 @@ def create_subtract_slot(
           offsetY,
           sizeX,
           sizeY,
-          binDepth,
-          roundDepth=15,
-          trayFloor=1.5):
+          depth,
+          round=15,
+          floor=1.5):
 
     sizeX = float(sizeX)
     sizeY = float(sizeY)
 
     # If round-depth is zero, it's just a square plug
-    if roundDepth<=0:
-        return translate([offsetX, offsetY, trayFloor]) \
+    if round<=0:
+        return translate([offsetX, offsetY, floor]) \
                  ( 
                      cube([sizeX, sizeY, depth*1.1])
                  )
@@ -76,8 +81,8 @@ def create_subtract_slot(
     fullPrism = cube([sizeX, sizeX, depth*1.1])
 
 
-    # Prism translated in the z-dir by the roundDepth
-    partPrism = translate([0, 0, roundDepth]) \
+    # Prism translated in the z-dir by the round
+    partPrism = translate([0, 0, round]) \
                     ( 
                         cube([sizeX, sizeX, depth*1.1])
                     )
@@ -86,9 +91,9 @@ def create_subtract_slot(
     # Start by creating a sphere in the center, scale it in y- an z-, then
     # translate it to the bottom of the partPrism
     sphereRad = sqrt(2)*sizeX/2.0
-    sphereScaleZ = roundDepth/sphereRad
+    sphereScaleZ = round/sphereRad
 
-    theSphere = translate([sizeX/2.0, sizeX/2.0, roundDepth]) \
+    theSphere = translate([sizeX/2.0, sizeX/2.0, round]) \
                     ( 
                         scale([1, 1, sphereScaleZ]) \
                         (
@@ -97,7 +102,7 @@ def create_subtract_slot(
                     )
 
     
-    return translate([offsetX, offsetY, trayFloor]) \
+    return translate([offsetX, offsetY, floor]) \
              ( 
                  scale([1, sizeY/sizeX, 1]) \
                  (
@@ -113,10 +118,9 @@ def create_subtract_slot(
                  )
              )
 
-    
 
 ################################################################################
-def computeBinVolume(xsz, ysz, depth, rdepth):
+def computeBinVolume(xsz, ysz, depth, round):
     """
     UPDATED:  Now we do this calculation exactly.  We compute the volume of the 
     prism and then compute the volume of the hemisphere.  The hemisphere is 
@@ -141,7 +145,7 @@ def computeBinVolume(xsz, ysz, depth, rdepth):
     # 
     sphereRad     = sqrt(2) * xsz / 2.0
     sphereScaleY = ysz / xsz
-    sphereScaleZ = rdepth / sphereRad
+    sphereScaleZ = round / sphereRad
 
     a = xsz / 2.0
     h = sphereRad - a
@@ -153,7 +157,7 @@ def computeBinVolume(xsz, ysz, depth, rdepth):
     roundVol_mm3 *= sphereScaleY
     roundVol_mm3 *= sphereScaleZ
 
-    prismTop_mm3 = (depth - rdepth) * xsz * ysz
+    prismTop_mm3 = (depth - round) * xsz * ysz
     totalVol_mm3 = prismTop_mm3 + roundVol_mm3
 
     # Now convert to both cups and mL (imperial and metric)
@@ -163,9 +167,32 @@ def computeBinVolume(xsz, ysz, depth, rdepth):
 
     return [totalVol_mL, totalVol_cups]
 
-    
-    
-def createTray(xlist, ylist, dep, rdep=15, wall=1.5, floor=1.5):
+
+def generate_tray_hash(xlist, ylist, floor, wall, depth, round):
+    """
+    This method generates a unique identifier for a given tray for the given version of this script
+    (based on the version.txt file).  This allows us to generate a given tray one time, and then it
+    can be saved to a central location and pulled if it is requested again, instead of regenerating.
+    """
+
+    to_hash = []
+
+    if os.path.exists('version.txt'):
+        to_hash.append(open('version.txt', 'r').read().strip())
+
+    to_hash.append(','.join([str(x) for x in xlist]))
+    to_hash.append(','.join([str(y) for y in ylist]))
+    to_hash.append(str(floor))
+    to_hash.append(str(wall))
+    to_hash.append(str(depth))
+    to_hash.append(str(round))
+
+    unique_str = '|'.join(to_hash).encode('utf-8')
+    print('Value hashed for ID:', unique_str)
+    return sha256(unique_str).hexdigest()
+
+
+def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
 
     # Create all the slots to be subtracted from the frame of the tray.
     slots = [] 
@@ -175,7 +202,7 @@ def createTray(xlist, ylist, dep, rdep=15, wall=1.5, floor=1.5):
     for ysz in ylist:
         xOff = wall
         for xsz in xlist:
-            slots.append(create_subtract_slot(xOff, yOff, xsz, ysz, dep, rdep, floor))
+            slots.append(create_subtract_slot(xOff, yOff, xsz, ysz, depth, round, floor))
             xOff += wall + xsz
         yOff += wall + ysz
 
@@ -213,21 +240,19 @@ if __name__=="__main__":
     NOTE:  ALL DIMENSIONS ARE IN MILLIMETERS (mm). 
     If your dimensions are inches then simply multiply by 25 to get approx mm
     values (25.4 to be exact).  So 25 mm is about 1 in, 200 mm is about 8 inches. 
-
+    
+    EXAMPLES:
+       $ python3 generate_tray.py [x0, x1, ...] [y0, y1, ...] <options>
+       $ python3 generate_tray.py [15,25,35] [30,40,50,60]
+       $ python3 generate_tray.py [25] [50,50,50,50] --depth=20 --wall=2.5 --floor=2 --round=12
+       
+       
+    NOTE: Total tray height is depth+floor.
     """
 
     #parser = argparse.ArgumentParser(usage=f"%(prog)\n", description=descr)
-    parser = argparse.ArgumentParser(usage=f"<create_tray.py> [options]\n", description=descr)
-
-    #parser.add_argument("xsizes", help="Widths of columns, \"[A,B,C,...]\"")
-    #parser.add_argument("ysizes", help="Heights of rows, \"[A,B,C,...]\"")
+    parser = argparse.ArgumentParser(usage=f"python3 generate_tray.py [options]\n", description=descr)
     parser.add_argument("bin_sizes", nargs='*')
-
-    parser.add_argument("--depth",
-                        dest="depth",
-                        default=None,
-                        type=float, 
-                        help="Depth of the tray above floor (mm, default 32)")
 
     parser.add_argument("--floor",
                         dest="floor",
@@ -241,17 +266,23 @@ if __name__=="__main__":
                         type=float, 
                         help="Thickness of walls (mm, default 1.8)")
 
+    parser.add_argument("--depth",
+                        dest="depth",
+                        default=None,
+                        type=float,
+                        help="Depth of the tray above floor (mm, default 32)")
+
     parser.add_argument("--round",
-                        dest="rdepth",
+                        dest="round",
                         default=None,
                         type=float, 
                         help="Height of tapered bottom (mm, default 12)")
 
-    parser.add_argument("--outfile",
+    parser.add_argument("-o", '--outfile',
                         dest="outfile",
-                        default='',
-                        type=str, 
-                        help="The output name of the resultant file")
+                        default=None,
+                        type=str,
+                        help="The output name of the resultant file (extension will be ignored)")
 
     parser.add_argument("--inches",
                         dest="unit_is_inches",
@@ -263,6 +294,23 @@ if __name__=="__main__":
                         action='store_true',
                         help="Skip prompts (for running headless)")
 
+    parser.add_argument("--s3bucket",
+                        dest='s3bucket',
+                        default=None,
+                        type=str,
+                        help="Put results into s3 bucket using hash locator")
+
+    parser.add_argument("--s3hash",
+                        dest='s3hash',
+                        default=None,
+                        type=str,
+                        help="Unique identifier for files to be stored in S3")
+
+    parser.add_argument("--hardcoded-params",
+                        dest='hardcoded_params',
+                        action='store_true',
+                        help="Ignore all other args, use hardcoded values in script")
+
     args = parser.parse_args()
     print(args)
 
@@ -271,31 +319,24 @@ if __name__=="__main__":
     
     # These are not set in the add_argument calls because we need to rescale
     # and don't know if they are use-supplied or default values.  
-    if args.floor is None:
-        args.floor = 1.8 / RESCALE
-
     if args.depth is None:
         args.depth = 32.0 / RESCALE
 
     if args.wall is None:
         args.wall = 1.8 / RESCALE
 
-    if args.rdepth is None:
-        args.rdepth = 12.0 / RESCALE
+    if args.floor is None:
+        args.floor = 1.8 / RESCALE
 
+    if args.round is None:
+        args.round = 12.0 / RESCALE
 
-    
-    # If you want to specify the args directly here instead of using the CLI, 
-    # set the following line to False then hardcode params in the "else:" clause
-    USE_CLI_ARGS = True
-
-
-    if USE_CLI_ARGS:
-        floor  = args.floor * RESCALE
-        wall   = args.wall * RESCALE
-        depth  = args.depth * RESCALE
-        rdepth = args.rdepth * RESCALE
-        fname  = args.outfile
+    if not args.hardcoded_params:
+        depth = args.depth * RESCALE
+        wall  = args.wall * RESCALE
+        floor = args.floor * RESCALE
+        round = args.round * RESCALE
+        fname = args.outfile
         try:
             size_args = ''.join(args.bin_sizes)
             size_args = size_args.replace(' ','').replace('][', '],[')
@@ -308,16 +349,15 @@ if __name__=="__main__":
             print(f'   {sys.argv[0]} [10, 20,30] [35,45, 55]')
             exit(1)
     else:
-        # Example for replacing the above lines if you don't want to use CLI (in mm)
-        floor  = 1.5
-        wall   = 1.5
-        depth  = 40
-        rdepth = 15
+        # HARDCODED PARAMETERS:  Modify values below and use --hardcoded-params
+        depth = 40
+        wall  = 1.5
+        floor = 1.5
+        round = 15
         xsizes = [30,45,60]
         ysizes = [50,50,50,50]
     
-    
-    if rdepth > depth-3:
+    if round > depth-3:
         print( '***Warning:  round depth needs to be at least 3mm smaller than bin depth')
 
         if not args.skip_prompts:
@@ -329,60 +369,61 @@ if __name__=="__main__":
             print( 'Aborting...')
             exit(1)
         else:
-            rdepth = max(depth-3, 0)
+            round = max(depth-3, 0)
 
     xszStrs = [str(int(x)) for x in xsizes]
     yszStrs = [str(int(y)) for y in ysizes]
     
-    print(f'Floor: {floor:.1f} mm  / {floor/MM2IN:.3f} in')
-    print(f'Wall:  {wall:.1f} mm   / {wall/MM2IN:.3f} in')
     print(f'Depth: {depth:.1f} mm  / {depth/MM2IN:.2f} in')
-    print(f'Round: {rdepth:.1f} mm / {rdepth/MM2IN:.2f} in')
+    print(f'Wall:  {wall:.1f} mm   / {wall/MM2IN:.3f} in')
+    print(f'Floor: {floor:.1f} mm  / {floor/MM2IN:.3f} in')
+    print(f'Round: {round:.1f} mm / {round/MM2IN:.2f} in')
 
     print('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
     print('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
     print('Widths:  [' + ', '.join([f'{x/MM2IN:.2f}' for x in xsizes]) + '] in')
     print('Heights: [' + ', '.join([f'{y/MM2IN:.2f}' for y in ysizes]) + '] in')
 
-    # If you don't override fname, the scad file will automatically be named
-    if not fname:
-        fname = 'tray_%s_by_%s.scad' % ('x'.join(xszStrs), 'x'.join(yszStrs))
+    if fname is None:
+        os.makedirs('output_trays', exist_ok=True)
+        fname = './output_trays/tray_%s_by_%s' % ('x'.join(xszStrs), 'x'.join(yszStrs))
+
+    # Remove any extension since we need to update
+    fname = os.path.splitext(fname)[0]
+    fn_scad = fname + '.scad'
+    fn_stl = fname + '.stl'
+    print(f'Will write:\n   {fn_scad}\n   {fn_stl}')
 
     # Now tell solid python to create the .scad file
-    print('Writing to OpenSCAD file:', fname)
-    twid,thgt,trayObj = createTray(xsizes,ysizes, depth, rdepth, wall, floor)
-    scad_render_to_file(trayObj, fname, file_header='$fn=64;')
-
-    
+    print('Writing to OpenSCAD file:', fn_scad)
+    twid,thgt,trayObj = createTray(xsizes, ysizes, depth, wall, floor, round)
+    scad_render_to_file(trayObj, fn_scad, file_header='$fn=64;')
 
     ################################################################################
-    # EVERYTHING BELOW THIS LINE IS SIMPLY FOR PRINTING ASCII DIAGRAMS
-    # Print some useful info
+    # The next section is simply for printing useful info to the console
+    ################################################################################
     print(f'Tray size is: {twid:.2f}mm by {thgt:.2f}mm')
     print(f'Tray size is: {twid/MM2IN:.2f}in by {thgt/MM2IN:.2f}in')
     
-
     # The diagram will be approximately 72 chars wide by 48 chars tall
     # Console letters are about 1.5 times taller than they are wide
     totalCharsWide = 82
     totalCharsHigh = float(thgt)/float(twid) * (totalCharsWide/2.0)
     
-    def getCharsWide(mm):
+    def compute_chars_wide(mm):
         maxInternalChars = totalCharsWide - (len(xsizes)+1)
         return max(10, int(maxInternalChars*float(mm)/float(twid)))
             
-    def getCharsHigh(mm):
+    def compute_chars_high(mm):
         maxInternalChars = totalCharsHigh - (len(ysizes)+1)
         return max(2, int(maxInternalChars*float(mm)/float(thgt)))
     
+    xchars = [compute_chars_wide(x) for x in xsizes]
+    ychars = [compute_chars_high(y) for y in ysizes]
     
-    xchars = [getCharsWide(x) for x in xsizes]
-    ychars = [getCharsHigh(y) for y in ysizes]
-    
-    print( '')
-    print( '')
-    
-    
+    print('')
+    print('')
+
     wCharsTotal = sum(xchars) + len(xchars) + 1
     hCharsTotal = sum(ychars) + len(ychars) + 1
     
@@ -401,7 +442,7 @@ if __name__=="__main__":
                 sys.stdout.write(' '*10 + '|')
     
             for i in range(len(xsizes)):
-                mL,cups = computeBinVolume(xsizes[i], ysizes[revj], depth, rdepth)
+                mL,cups = computeBinVolume(xsizes[i], ysizes[revj], depth, round)
         
                 if jc==yhgt//2-1:
                     sys.stdout.write(('%0.2f cups' % cups).center(xchars[i]))
@@ -426,18 +467,53 @@ if __name__=="__main__":
     print(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM2IN:.2f} in')
     print('')
 
+    ################################################################################
+    # Get confirmation (if not --yes) and then actually do the STL generation
+    ################################################################################
     if not args.skip_prompts:
         ok = input('Generate STL file? (this can take a few minutes) [N/y]: ')
     else:
         ok = 'yes'
 
-    if ok.lower().startswith('y'):
-        stlname = fname+'.stl'
-        print('Converting to STL file:', stlname)
-        proc = subprocess.Popen('openscad -o "%s" "%s"' % (stlname, fname), shell=True)
-        while proc.poll()==None:
-            time.sleep(0.1)
+    if not ok.lower().startswith('y'):
+        exit(0)
 
+    if args.s3bucket is not None:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        if args.s3hash is None:
+            args.s3hash = generate_tray_hash(xsizes, ysizes, twid, thgt, depth, round)
+
+        s3paths = {
+            'stl': f'{args.s3hash}/organizer_tray.stl',
+            'status': f'{args.s3hash}/status.txt'
+        }
+
+        s3client = boto3.client('s3')
+
+        def str_to_s3status(s, s3obj=s3paths['status']):
+            temp_file_obj = tempfile.TemporaryFile()
+            temp_file_obj.write(s.encode('utf-8'))
+            s3client.upload_fileobj(temp_file_obj, args.s3bucket, s3obj)
+
+        str_to_s3status('Model generation started.  This may take a few minutes.')
+
+    print('Converting to STL file:', fn_stl)
+
+    try:
+        proc = subprocess.check_call('openscad -o "%s" "%s"' % (fn_stl, fn_scad), shell=True)
+    except Exception as e:
+        print('Failed to produce model:', str(e))
+        conversion_failed = True
+        if args.s3bucket is not None:
+            str_to_s3status(f'Model generation failed.  Error:\n{str(e)}')
+
+    if args.s3bucket is not None:
+        try:
+            response = s3client.upload_file(fn_stl, args.s3bucket, s3paths['stl'])
+        except ClientError as e:
+            str_to_s3status(f'Model generated but server failed to upload.  Error:\n{str(e)}')
 
 
 

@@ -3,91 +3,98 @@
 {% block content %}
     <h1>{% block title %} Generate Custom Organizer Tray (.stl) {% endblock %}</h1>
 
-    <form method="POST" action="/gentray">
-        {{ form.csrf_token }}
-        <p>
-            {{ form.binary_mm_or_in.label }}
-            {{ form.binary_mm_or_in(size=14) }}
-        </p>
+    <div class="row">
+        <div class="column">
+            <form method="POST" action="/gentray">
+                {{ form.csrf_token }}
+                <p>
+                    {{ form.binary_mm_or_in.label }}
+                    {{ form.binary_mm_or_in(size=14) }}
+                </p>
 
-        {% if form.binary_mm_or_in.errors %}
-            <ul class="errors">
-                {% for error in form.binary_mm_or_in.errors %}
+                {% if form.binary_mm_or_in.errors %}
+                    <ul class="errors">
+                        {% for error in form.binary_mm_or_in.errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+
+                <p>
+                    {{ form.x_list.label }}
+                    {{ form.x_list(size=14) }}
+                </p>
+
+                {% if form.x_list.errors %}
+                    <ul class="errors">
+                        {% for error in form.x_list.errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+
+                <p>
+                    {{ form.y_list.label }}
+                    {{ form.y_list(size=14) }}
+                </p>
+
+                {% if form.y_list.errors %}
+                <ul class="errors">
+                    {% for error in form.y_list.errors %}
                     <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
+                    {% endfor %}
+                </ul>
+                {% endif %}
 
-        <p>
-            {{ form.x_list.label }}
-            {{ form.x_list(size=14) }}
-        </p>
+                <p>
+                    {{ form.wall_thickness.label }}
+                    {{ form.wall_thickness(size=8) }}
+                </p>
 
-        {% if form.x_list.errors %}
-            <ul class="errors">
-                {% for error in form.x_list.errors %}
+                {% if form.wall_thickness.errors %}
+                    <ul class="errors">
+                        {% for error in form.wall_thickness.errors %}
+                            <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+
+                <p>
+                    {{ form.tray_depth.label }}
+                    {{ form.tray_depth(size=8) }}
+                </p>
+
+                {% if form.tray_depth.errors %}
+                <ul class="errors">
+                    {% for error in form.tray_depth.errors %}
                     <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
+                    {% endfor %}
+                </ul>
+                {% endif %}
 
-        <p>
-            {{ form.y_list.label }}
-            {{ form.y_list(size=14) }}
-        </p>
+                <p>
+                    {{ form.floor_round.label }}
+                    {{ form.floor_round(size=8) }}
+                </p>
 
-        {% if form.y_list.errors %}
-        <ul class="errors">
-            {% for error in form.y_list.errors %}
-            <li>{{ error }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-
-        <p>
-            {{ form.wall_thickness.label }}
-            {{ form.wall_thickness(size=8) }}
-        </p>
-
-        {% if form.wall_thickness.errors %}
-            <ul class="errors">
-                {% for error in form.wall_thickness.errors %}
+                {% if form.floor_round.errors %}
+                <ul class="errors">
+                    {% for error in form.floor_round.errors %}
                     <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        {% endif %}
+                    {% endfor %}
+                </ul>
+                {% endif %}
 
-        <p>
-            {{ form.tray_depth.label }}
-            {{ form.tray_depth(size=8) }}
-        </p>
+                <p>
+                    <input type="submit" name="preview_only" value="Generate Preview" />
+                </p>
 
-        {% if form.tray_depth.errors %}
-        <ul class="errors">
-            {% for error in form.tray_depth.errors %}
-            <li>{{ error }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-
-        <p>
-            {{ form.floor_round.label }}
-            {{ form.floor_round(size=8) }}
-        </p>
-
-        {% if form.floor_round.errors %}
-        <ul class="errors">
-            {% for error in form.floor_round.errors %}
-            <li>{{ error }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-
-        <p>
-            <input type="submit" name="preview_only" value="Preview" />
-        </p>
-
-    </form>
+            </form>
+        </div>
+        <div class="column">
+            <img src="/static/dim_diagram.png" alt="Dimensional Diagram" style="width:44%">
+        </div>
+    </div>
 
     {% if preview %}
     <form method="POST" action="/gen_download_stl">
