@@ -45,7 +45,8 @@ def rescale_dims_for_display(
     return xlist_adj, ylist_adj, wall_size_adj
 
 
-def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, out_filename=None):
+def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, depth=None, floor=None, out_filename=None):
+    # Depth and floor args are provided just to be displayed, not used in computing the drawing
     fig, ax = plt.subplots(figsize=(12, 12))
 
     if vol_mtrx_ml is not None:
@@ -84,7 +85,7 @@ def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, out_filename=None):
                 ax.text(xoff + x/2,
                         yoff + y/2,
                         f'{vol_ml} mL\n({vol_cup:.2f} cups)',
-                        size=9,
+                        size=12,
                         ha='center',
                         va='center',
                         color='w')
@@ -105,10 +106,14 @@ def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, out_filename=None):
         yoff = y0 + wall_size_draw
         xoff += x + wall_size_draw
         
-    # Some summary text         
-    txt1 = f'Total Tray Size (mm): {x_total:.1f} mm x {y_total:.1f} mm'
-    txt2 = f'Total Tray Size (in): {x_total/MM_PER_IN:.2f} in x {y_total/MM_PER_IN:.2f} in'
-    ax.text(2, 1, txt1+'\n'+txt2, size=12, ha='left', va='bottom')
+    # Some summary text
+    disp_txt  = ''
+    disp_txt += f'Total Tray Size (mm): {x_total:.1f} mm x {y_total:.1f} mm'
+    disp_txt += f' ({x_total/MM_PER_IN:.2f} in x {y_total/MM_PER_IN:.2f} in)'
+    if None not in [depth, floor]:
+        disp_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} mm'
+        disp_txt += f' ({(depth + floor)/MM_PER_IN:.2f} in)'
+    ax.text(2, 1, disp_txt, size=12, ha='left', va='bottom')
     
     ax.set_xlim(0, x0+x_total+5)
     ax.set_ylim(0, y0+y_total+5)

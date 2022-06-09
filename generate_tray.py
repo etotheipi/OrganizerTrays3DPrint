@@ -35,6 +35,7 @@ Type the following to see all options:
 
                 
 """
+import copy
 import io
 
 from solid import *
@@ -49,6 +50,17 @@ import sys
 import argparse
 import subprocess
 import tempfile
+import yaml
+import logging
+
+
+logging.basicConfig(filename='gentray_script.log', level=logging.DEBUG)
+logging.info('Starting generate script')
+def LOG_IT(*strs):
+    sstrs = [str(s) for s in strs]
+    print(*sstrs)
+    logging.info(' '.join(sstrs))
+
 
 xScale = 1.0
 yScale = 1.0
@@ -57,43 +69,36 @@ zScale = 1.0
 
 ################################################################################
 # This will create a plug that can be subtracted from the tray frame/box
-def create_subtract_slot(
-          offsetX,
-          offsetY,
-          sizeX,
-          sizeY,
-          depth,
-          round=15,
-          floor=1.5):
+def create_subtract_slot(x_offset, y_offset, x_size, y_size, depth, floor, round):
 
-    sizeX = float(sizeX)
-    sizeY = float(sizeY)
+    x_size = float(x_size)
+    y_size = float(y_size)
 
     # If round-depth is zero, it's just a square plug
     if round<=0:
-        return translate([offsetX, offsetY, floor]) \
+        return translate([x_offset, y_offset, floor]) \
                  ( 
-                     cube([sizeX, sizeY, depth*1.1])
+                     cube([x_size, y_size, depth*1.1])
                  )
 
     # Create 1:1 aspect, then stretch the whole thing at once 
     # Prism sitting with corner at origin
-    fullPrism = cube([sizeX, sizeX, depth*1.1])
+    fullPrism = cube([x_size, x_size, depth*1.1])
 
 
     # Prism translated in the z-dir by the round
     partPrism = translate([0, 0, round]) \
                     ( 
-                        cube([sizeX, sizeX, depth*1.1])
+                        cube([x_size, x_size, depth*1.1])
                     )
 
 
     # Start by creating a sphere in the center, scale it in y- an z-, then
     # translate it to the bottom of the partPrism
-    sphereRad = sqrt(2)*sizeX/2.0
+    sphereRad = sqrt(2)*x_size/2.0
     sphereScaleZ = round/sphereRad
 
-    theSphere = translate([sizeX/2.0, sizeX/2.0, round]) \
+    theSphere = translate([x_size/2.0, x_size/2.0, round]) \
                     ( 
                         scale([1, 1, sphereScaleZ]) \
                         (
@@ -102,9 +107,9 @@ def create_subtract_slot(
                     )
 
     
-    return translate([offsetX, offsetY, floor]) \
+    return translate([x_offset, y_offset, floor]) \
              ( 
-                 scale([1, sizeY/sizeX, 1]) \
+                 scale([1, y_size/x_size, 1]) \
                  (
                      intersection() \
                      ( 
@@ -120,7 +125,7 @@ def create_subtract_slot(
 
 
 ################################################################################
-def computeBinVolume(xsz, ysz, depth, round):
+def compute_bin_volume(xsz, ysz, depth, round):
     """
     UPDATED:  Now we do this calculation exactly.  We compute the volume of the 
     prism and then compute the volume of the hemisphere.  The hemisphere is 
@@ -168,13 +173,12 @@ def computeBinVolume(xsz, ysz, depth, round):
     return [totalVol_mL, totalVol_cups]
 
 
-def generate_tray_hash(xlist, ylist, floor, wall, depth, round):
+def generate_tray_hash(xlist, ylist, depth, wall, floor, round):
     """
     This method generates a unique identifier for a given tray for the given version of this script
     (based on the version.txt file).  This allows us to generate a given tray one time, and then it
     can be saved to a central location and pulled if it is requested again, instead of regenerating.
     """
-
     to_hash = []
 
     if os.path.exists('version.txt'):
@@ -188,8 +192,10 @@ def generate_tray_hash(xlist, ylist, floor, wall, depth, round):
     to_hash.append(str(round))
 
     unique_str = '|'.join(to_hash).encode('utf-8')
-    print('Value hashed for ID:', unique_str)
-    return sha256(unique_str).hexdigest()
+    hash_str = sha256(unique_str).hexdigest()
+    LOG_IT('Value hashed for ID:', unique_str)
+    LOG_IT('Hash value for tray:', hash_str)
+    return hash_str
 
 
 def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
@@ -202,10 +208,9 @@ def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
     for ysz in ylist:
         xOff = wall
         for xsz in xlist:
-            slots.append(create_subtract_slot(xOff, yOff, xsz, ysz, depth, round, floor))
+            slots.append(create_subtract_slot(xOff, yOff, xsz, ysz, depth, floor, round))
             xOff += wall + xsz
         yOff += wall + ysz
-
 
     # The loops leave xOff & yOff at the upper-left corner of the tray.  Perfect!
     totalWidth  = xOff
@@ -216,8 +221,7 @@ def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
     
     # Create the prism from which the slots will be subtracted
     trayBasePrism = cube([totalWidth, totalHeight, floor+depth])
-    
-    
+
     # Finally, create the object and scale by the printer-calibration data
     return [totalWidth, totalHeight, 
               scale([xScale, yScale, zScale]) \
@@ -230,10 +234,23 @@ def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
               )]
 
 
+# Only if there is
+def upload_status(params, status, message, s3obj):
+    s3client = boto3.client('s3')
+    upload_params = copy.deepcopy(params)
+    stat_file = {
+        'status': status,
+        'message': message,
+        'params': upload_params
+    }
+
+    with tempfile.TemporaryFile() as fp:
+        fp.write(yaml.dump(stat_file, indent=2).encode('utf-8'))
+        fp.seek(0)
+        s3client.upload_fileobj(fp, args.s3bucket, s3obj, ExtraArgs={'ContentType': 'text/plain', 'ACL': 'public-read'})
 
 
 if __name__=="__main__":
-    
     descr = """
     Create generic trays with rounded bin floors.
 
@@ -300,8 +317,8 @@ if __name__=="__main__":
                         type=str,
                         help="Put results into s3 bucket using hash locator")
 
-    parser.add_argument("--s3hash",
-                        dest='s3hash',
+    parser.add_argument("--s3dir",
+                        dest='s3dir',
                         default=None,
                         type=str,
                         help="Unique identifier for files to be stored in S3")
@@ -312,7 +329,9 @@ if __name__=="__main__":
                         help="Ignore all other args, use hardcoded values in script")
 
     args = parser.parse_args()
-    print(args)
+
+
+    logging.info(yaml.dump(args.__dict__, indent=2))
 
     MM2IN = 25.4
     RESCALE = MM2IN if args.unit_is_inches else 1.0
@@ -344,9 +363,9 @@ if __name__=="__main__":
             xsizes = [RESCALE * x for x in xsizes]
             ysizes = [RESCALE * y for y in ysizes]
         except Exception as e:
-            print('Must provide sizes of bins as comma-separated list using square-brackets')
-            print('Example:')
-            print(f'   {sys.argv[0]} [10, 20,30] [35,45, 55]')
+            LOG_IT('Must provide sizes of bins as comma-separated list using square-brackets')
+            LOG_IT('Example:')
+            LOG_IT(f'   {sys.argv[0]} [10, 20,30] [35,45, 55]')
             exit(1)
     else:
         # HARDCODED PARAMETERS:  Modify values below and use --hardcoded-params
@@ -358,7 +377,7 @@ if __name__=="__main__":
         ysizes = [50,50,50,50]
     
     if round > depth-3:
-        print( '***Warning:  round depth needs to be at least 3mm smaller than bin depth')
+        LOG_IT( '***Warning:  round depth needs to be at least 3mm smaller than bin depth')
 
         if not args.skip_prompts:
             ok = input('Shorten round depth? [Y/n]: ')
@@ -366,7 +385,7 @@ if __name__=="__main__":
             ok = 'yes'
 
         if ok.lower().startswith('n'):
-            print( 'Aborting...')
+            LOG_IT( 'Aborting...')
             exit(1)
         else:
             round = max(depth-3, 0)
@@ -374,15 +393,15 @@ if __name__=="__main__":
     xszStrs = [str(int(x)) for x in xsizes]
     yszStrs = [str(int(y)) for y in ysizes]
     
-    print(f'Depth: {depth:.1f} mm  / {depth/MM2IN:.2f} in')
-    print(f'Wall:  {wall:.1f} mm   / {wall/MM2IN:.3f} in')
-    print(f'Floor: {floor:.1f} mm  / {floor/MM2IN:.3f} in')
-    print(f'Round: {round:.1f} mm / {round/MM2IN:.2f} in')
+    LOG_IT(f'Depth: {depth:.1f} mm  / {depth/MM2IN:.2f} in')
+    LOG_IT(f'Wall:  {wall:.1f} mm   / {wall/MM2IN:.3f} in')
+    LOG_IT(f'Floor: {floor:.1f} mm  / {floor/MM2IN:.3f} in')
+    LOG_IT(f'Round: {round:.1f} mm / {round/MM2IN:.2f} in')
 
-    print('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
-    print('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
-    print('Widths:  [' + ', '.join([f'{x/MM2IN:.2f}' for x in xsizes]) + '] in')
-    print('Heights: [' + ', '.join([f'{y/MM2IN:.2f}' for y in ysizes]) + '] in')
+    LOG_IT('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
+    LOG_IT('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
+    LOG_IT('Widths:  [' + ', '.join([f'{x/MM2IN:.2f}' for x in xsizes]) + '] in')
+    LOG_IT('Heights: [' + ', '.join([f'{y/MM2IN:.2f}' for y in ysizes]) + '] in')
 
     if fname is None:
         os.makedirs('output_trays', exist_ok=True)
@@ -392,18 +411,18 @@ if __name__=="__main__":
     fname = os.path.splitext(fname)[0]
     fn_scad = fname + '.scad'
     fn_stl = fname + '.stl'
-    print(f'Will write:\n   {fn_scad}\n   {fn_stl}')
+    LOG_IT(f'Will write:\n   {fn_scad}\n   {fn_stl}')
 
     # Now tell solid python to create the .scad file
-    print('Writing to OpenSCAD file:', fn_scad)
+    LOG_IT('Writing to OpenSCAD file:', fn_scad)
     twid,thgt,trayObj = createTray(xsizes, ysizes, depth, wall, floor, round)
     scad_render_to_file(trayObj, fn_scad, file_header='$fn=64;')
 
     ################################################################################
     # The next section is simply for printing useful info to the console
     ################################################################################
-    print(f'Tray size is: {twid:.2f}mm by {thgt:.2f}mm')
-    print(f'Tray size is: {twid/MM2IN:.2f}in by {thgt/MM2IN:.2f}in')
+    LOG_IT(f'Tray size is: {twid:.2f}mm by {thgt:.2f}mm')
+    LOG_IT(f'Tray size is: {twid/MM2IN:.2f}in by {thgt/MM2IN:.2f}in')
     
     # The diagram will be approximately 72 chars wide by 48 chars tall
     # Console letters are about 1.5 times taller than they are wide
@@ -421,8 +440,8 @@ if __name__=="__main__":
     xchars = [compute_chars_wide(x) for x in xsizes]
     ychars = [compute_chars_high(y) for y in ysizes]
     
-    print('')
-    print('')
+    LOG_IT('')
+    LOG_IT('')
 
     wCharsTotal = sum(xchars) + len(xchars) + 1
     hCharsTotal = sum(ychars) + len(ychars) + 1
@@ -442,7 +461,7 @@ if __name__=="__main__":
                 sys.stdout.write(' '*10 + '|')
     
             for i in range(len(xsizes)):
-                mL,cups = computeBinVolume(xsizes[i], ysizes[revj], depth, round)
+                mL,cups = compute_bin_volume(xsizes[i], ysizes[revj], depth, round)
         
                 if jc==yhgt//2-1:
                     sys.stdout.write(('%0.2f cups' % cups).center(xchars[i]))
@@ -462,10 +481,19 @@ if __name__=="__main__":
         sys.stdout.write(sizeStr.center(xchars[i]+1))
     sys.stdout.write('\n\n')
     
-    print(f'Total Width  (with walls):  {twid:.2f} mm \t /  {twid/MM2IN:.2f} in')
-    print(f'Total Height (with walls):  {thgt:.2f} mm \t /  {thgt/MM2IN:.2f} in')
-    print(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM2IN:.2f} in')
-    print('')
+    LOG_IT(f'Total Width  (with walls):  {twid:.2f} mm \t /  {twid/MM2IN:.2f} in')
+    LOG_IT(f'Total Height (with walls):  {thgt:.2f} mm \t /  {thgt/MM2IN:.2f} in')
+    LOG_IT(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM2IN:.2f} in')
+    LOG_IT('')
+
+    param_map = {
+        'xlist': xsizes,
+        'ylist': ysizes,
+        'depth': depth,
+        'wall': wall,
+        'floor': floor,
+        'round': round
+    }
 
     ################################################################################
     # Get confirmation (if not --yes) and then actually do the STL generation
@@ -478,46 +506,49 @@ if __name__=="__main__":
     if not ok.lower().startswith('y'):
         exit(0)
 
+    # The following section is only relevant if you specified an S3 storage location
     if args.s3bucket is not None:
         import boto3
         from botocore.exceptions import ClientError
 
-        if args.s3hash is None:
-            args.s3hash = generate_tray_hash(xsizes, ysizes, twid, thgt, depth, round)
+        if args.s3dir is None:
+            args.s3dir = generate_tray_hash(xsizes, ysizes, depth, wall, floor, round)
 
         s3paths = {
-            'stl': f'{args.s3hash}/organizer_tray.stl',
-            'status': f'{args.s3hash}/status.txt'
+            'stl': f'{args.s3dir}/organizer_tray.stl',
+            'status': f'{args.s3dir}/status.txt'
         }
 
-        s3client = boto3.client('s3')
+        upload_status(param_map,
+                      status='Initiated',
+                      message=f'Model generation initiated.  Please wait a few minutes.',
+                      s3obj=s3paths['status'])
 
-        def str_to_s3status(s, s3obj=s3paths['status']):
-            temp_file_obj = tempfile.TemporaryFile()
-            temp_file_obj.write(s.encode('utf-8'))
-            s3client.upload_fileobj(temp_file_obj, args.s3bucket, s3obj)
-
-        str_to_s3status('Model generation started.  This may take a few minutes.')
-
-    print('Converting to STL file:', fn_stl)
+    LOG_IT('Converting to STL file:', fn_stl)
 
     try:
         proc = subprocess.check_call('openscad -o "%s" "%s"' % (fn_stl, fn_scad), shell=True)
+        if args.s3bucket is not None:
+            upload_status(param_map,
+                          status='Complete',
+                          message=f'Model Generation Complete.  You can download the STL now',
+                          s3obj=s3paths['status'])
     except Exception as e:
-        print('Failed to produce model:', str(e))
+        LOG_IT('Failed to produce model:', str(e))
         conversion_failed = True
         if args.s3bucket is not None:
-            str_to_s3status(f'Model generation failed.  Error:\n{str(e)}')
+            upload_status(param_map,
+                          status='Failed',
+                          message=f'Model generation script return an error: "{str(e)}"',
+                          s3obj=s3paths['status'])
 
     if args.s3bucket is not None:
         try:
+            s3client = boto3.client('s3')
             response = s3client.upload_file(fn_stl, args.s3bucket, s3paths['stl'])
         except ClientError as e:
-            str_to_s3status(f'Model generated but server failed to upload.  Error:\n{str(e)}')
-
-
-
-
-
-
+            upload_status(param_map,
+                          status='Failed',
+                          message=f'Model created but could not be made available for download.  Error: "{str(e)}"',
+                          s3obj=s3paths['status'])
 

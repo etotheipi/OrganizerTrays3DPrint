@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>{% block title %} {% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
     <style>
         nav a {
             color: #5555aa;
@@ -11,8 +12,9 @@
             margin-left: 50px;
             text-decoration: none;
         }
+
     </style>
-    {% if wait_for_downlaod is defined and variable %}
+    {% if wait_for_download is defined and wait_for_download %}
         <meta http-equiv="refresh" content="15">
     {% endif %}
 </head>
