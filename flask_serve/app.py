@@ -23,7 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 #boto3.setup_default_session(profile_name='default')
 
-logging.basicConfig(filename='gentray_server.log', level=logging.DEBUG)
+logging.basicConfig(filename='gentray_server.log', level=logging.INFO)
 logging.info('Starting server...')
 
 sys.path.append('..')
@@ -33,7 +33,7 @@ THIS_SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
 S3BUCKET = 'etotheipi-gentray-store'
 
 from gen_tray_png import draw_tray, base64_encode_file
-from generate_tray import compute_bin_volume, generate_tray_hash
+from generate_tray import compute_bin_volume, generate_tray_hash, check_status
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'c70ed076fbeccb6230acbc437e6be159'
@@ -89,8 +89,8 @@ class GenTrayForm(FlaskForm):
                                 validators=[InputRequired(), validator_is_positive_numeric])
 
     floor_thickness = FloatField(label="Thickness of floor (in selected units)",
-                             default=2.4,
-                             validators=[InputRequired(), validator_is_positive_numeric])
+                                 default=1.8,
+                                 validators=[InputRequired(), validator_is_positive_numeric])
 
     floor_round = FloatField(label="Roundness of bin floors (in selected units)",
                              default=12,
@@ -127,8 +127,6 @@ def gen_tray_form():
             'floor': floor,
             'round': round,
         }
-
-        print(request.args)
 
         logging.info(yaml.dump(input_dict, indent=2))
 
@@ -201,42 +199,48 @@ def process_stl_request():
 
 @app.route('/download_status_wait/<tray_hash>', methods=('GET',))
 def download_status_wait(tray_hash):
-    s3_download = f'https://etotheipi-gentray-store.s3.amazonaws.com/{tray_hash}/status.txt'
-    status_yaml = requests.get(s3_download).content
-    print("Getting status file", s3_download)
-    status_dict = yaml.safe_load(status_yaml)
+    dl_status = check_status(S3BUCKET, tray_hash)
+    logging.info(yaml.dump(dl_status, indent=2))
+
+    if dl_status['status'].lower() == 'dne':  # Nothing exists yet
+        return render_template('download_stl.html',
+                               wait_for_download=True,
+                               is_complete=False,
+                               message="Request submitted to generate tray.",
+                               tray_hash=tray_hash)
+
 
     tmp_file = draw_tray(
-        status_dict['params']['xlist'],
-        status_dict['params']['ylist'],
-        status_dict['params']['wall'],
+        dl_status['params']['xlist'],
+        dl_status['params']['ylist'],
+        dl_status['params']['wall'],
         vol_mtrx_ml=None,
-        floor=status_dict['params']['floor'],
-        depth=status_dict['params']['wall'])
+        floor=dl_status['params']['floor'],
+        depth=dl_status['params']['depth'])
 
     rawb64 = base64_encode_file(tmp_file)
 
-    if status_dict['status'].lower() == 'initiated':
+    if dl_status['status'].lower() == 'initiated':
         return render_template('download_stl.html',
                                wait_for_download=True,
                                is_complete=False,
                                preview_b64=rawb64,
                                message="Tray is being generated.  Please wait...",
-                               params=status_dict['params'],
+                               params=dl_status['params'],
                                tray_hash=tray_hash)
-    elif status_dict['status'].lower() == 'complete':
+    elif dl_status['status'].lower() == 'complete':
         return render_template('download_stl.html',
                                wait_for_download=True,
                                is_complete=True,
                                preview_b64=rawb64,
                                message="Tray generation complete!  Use the download link below",
-                               params=status_dict['params'],
+                               params=dl_status['params'],
                                tray_hash=tray_hash)
-    elif status_dict['status'].lower() == 'failed':
+    elif dl_status['status'].lower() == 'failed':
         return render_template('download_stl.html',
                                wait_for_download=False,
                                is_complete=False,
-                               params=status_dict['params'],
+                               params=dl_status['params'],
                                tray_hash=tray_hash)
 
 

@@ -49,13 +49,16 @@ import time
 import sys
 import argparse
 import subprocess
+import requests
 import tempfile
 import yaml
 import logging
 
 
-logging.basicConfig(filename='gentray_script.log', level=logging.DEBUG)
+logging.basicConfig(filename='gentray_script.log', level=logging.INFO)
 logging.info('Starting generate script')
+
+# A simple method that dumps log messages to both the terminal and logfile
 def LOG_IT(*strs):
     sstrs = [str(s) for s in strs]
     print(*sstrs)
@@ -249,6 +252,19 @@ def upload_status(params, status, message, s3obj):
         fp.seek(0)
         s3client.upload_fileobj(fp, args.s3bucket, s3obj, ExtraArgs={'ContentType': 'text/plain', 'ACL': 'public-read'})
 
+# Only if there is
+def check_status(s3bucket, s3dir):
+    s3_download = f'https://{s3bucket}.s3.amazonaws.com/{s3dir}/status.txt'
+    status_file_obj = requests.get(s3_download)
+    if status_file_obj.status_code != 200:
+        return {'status': 'DNE'}
+    else:
+        LOG_IT("Getting status file to see if it has already been created:", s3_download)
+        status_dict = yaml.safe_load(status_file_obj.content)
+        return status_dict
+
+
+
 
 if __name__=="__main__":
     descr = """
@@ -331,7 +347,7 @@ if __name__=="__main__":
     args = parser.parse_args()
 
 
-    logging.info(yaml.dump(args.__dict__, indent=2))
+    LOG_IT(yaml.dump(args.__dict__, indent=2))
 
     MM2IN = 25.4
     RESCALE = MM2IN if args.unit_is_inches else 1.0
@@ -513,6 +529,11 @@ if __name__=="__main__":
 
         if args.s3dir is None:
             args.s3dir = generate_tray_hash(xsizes, ysizes, depth, wall, floor, round)
+
+        exist_status = check_status(args.s3bucket, args.s3dir)
+        if exist_status['status'].lower() != 'dne':  # does-not-exist flag is false == already exists
+            LOG_IT(f'Tray already exists.')
+            exit(0)
 
         s3paths = {
             'stl': f'{args.s3dir}/organizer_tray.stl',
