@@ -1,3 +1,4 @@
+import copy
 import os.path
 
 from flask import Flask, render_template, redirect, url_for, send_file, request
@@ -14,6 +15,8 @@ import time
 import logging
 import subprocess
 import requests
+
+MM_PER_IN = 25.4
 
 
 # If you want to hardcode specific AWS profile (in ~/.aws/config or ~/.aws/credentials), then
@@ -73,7 +76,7 @@ class GenTrayForm(FlaskForm):
     x_list = StringField(label='Bin X-sizes (in selected units)',
                          description='Comma-separated list in specified units',
                          default="30, 40, 75",
-                         validators = [InputRequired(), validator_xylist_check])
+                         validators=[InputRequired(), validator_xylist_check])
 
     y_list = StringField(label='Bin Y-sizes (in selected units)',
                          description='Comma-separated list in specified units',
@@ -97,54 +100,75 @@ class GenTrayForm(FlaskForm):
                              validators=[InputRequired(), validator_is_positive_numeric])
 
 
+def compute_volume_matrix(xlist, ylist, depth, round, units='mm'):
+    vol_mtrx = np.zeros(shape=(len(xlist), len(ylist)))
+    RESCALE = 1 if units == 'mm' else MM_PER_IN
+    for ix, x in enumerate(xlist):
+        for iy, y in enumerate(ylist):
+            vol_mtrx[ix, iy], _ = compute_bin_volume(x * RESCALE,
+                                                     y * RESCALE,
+                                                     depth * RESCALE,
+                                                     round * RESCALE)
+
+    return vol_mtrx
+
+
+def parse_form(form):
+    units = form.binary_mm_or_in.data
+    xlist = ast.literal_eval('[' + form.x_list.data.strip('[]') + ']')
+    ylist = ast.literal_eval('[' + form.y_list.data.strip('[]') + ']')
+
+    depth = float(form.tray_depth.data)
+    wall = float(form.wall_thickness.data)
+    floor = float(form.floor_thickness.data)
+    round = float(form.floor_round.data)
+
+    input_dict = {
+        'xlist': xlist,
+        'ylist': ylist,
+        'depth': depth,
+        'wall': wall,
+        'floor': floor,
+        'round': round,
+        'units': units
+    }
+
+    logging.info(yaml.dump(input_dict, indent=2))
+    input_dict['vol_mtrx_ml'] = compute_volume_matrix(xlist, ylist, depth, round, units)
+    return input_dict
+
 @app.route('/', methods=('GET', 'POST'))
 def redirect_root():
     return redirect(url_for('gen_tray_form'))
 
-@app.route('/gentray', methods=('GET', 'POST'))
+
+@app.route('/traygen', methods=('GET', 'POST'))
 def gen_tray_form():
     logging.info("gen_tray_form called")
     form = GenTrayForm()
-    #if form.validate_on_submit():
-    if form.is_submitted():
-        RESCALE = 1 if str(form.binary_mm_or_in.data) == 'mm' else 25.4
+    if form.validate_on_submit():
+        param_map = parse_form(form)
 
-        xlist = ast.literal_eval('['+form.x_list.data.strip('[]')+']')
-        ylist = ast.literal_eval('['+form.y_list.data.strip('[]')+']')
-        xlist = [RESCALE * x for x in xlist]
-        ylist = [RESCALE * y for y in ylist]
+        tmp_file = draw_tray(param_map['xlist'],
+                             param_map['ylist'],
+                             param_map['wall'],
+                             param_map['vol_mtrx_ml'],
+                             param_map['depth'],
+                             param_map['floor'],
+                             units=param_map['units'])
 
-        depth = float(form.tray_depth.data) * RESCALE
-        wall = float(form.wall_thickness.data) * RESCALE
-        floor = float(form.floor_thickness.data) * RESCALE
-        round = float(form.floor_round.data) * RESCALE
-
-        input_dict = {
-            'xlist': xlist,
-            'ylist': ylist,
-            'depth': depth,
-            'wall': wall,
-            'floor': floor,
-            'round': round,
-        }
-
-        logging.info(yaml.dump(input_dict, indent=2))
-
-        vol_mtrx = np.zeros(shape=(len(xlist), len(ylist)))
-        for ix,x in enumerate(xlist):
-            for iy,y in enumerate(ylist):
-                vol_mtrx[ix, iy], _ = compute_bin_volume(x, y, depth, round)
-
-        tmp_file = draw_tray(xlist, ylist, wall, vol_mtrx, floor=floor, depth=depth)
         rawb64 = base64_encode_file(tmp_file)
 
-        cmd_args  = f" \\\n   {xlist}"
-        cmd_args += f" \\\n   {ylist}"
-        cmd_args += f" \\\n   --depth {depth}"
-        cmd_args += f" \\\n   --wall {wall}"
-        cmd_args += f" \\\n   --floor {floor}"
-        cmd_args += f" \\\n   --round {round}"
+        cmd_args  = f" \\\n   {param_map['xlist']}"
+        cmd_args += f" \\\n   {param_map['ylist']}"
+        cmd_args += f" \\\n   --depth {param_map['depth']}"
+        cmd_args += f" \\\n   --wall {param_map['wall']}"
+        cmd_args += f" \\\n   --floor {param_map['floor']}"
+        cmd_args += f" \\\n   --round {param_map['round']}"
         cmd_args += f" \\\n   --yes"
+
+        if form.binary_mm_or_in.data != 'mm':
+            cmd_args += f" \\\n   --inches"
 
         docker_cmd = "docker run -it -v `pwd`:/mnt etotheipi/3dprint-tray-gen:latest"
         local_cmd = "python3 generate_tray.py"
@@ -158,33 +182,34 @@ def gen_tray_form():
 
     return render_template('input_form.html', form=form, preview=False, preview_b64=None)
 
+
 @app.route('/process_stl_request', methods=('POST',))
 def process_stl_request():
     form = GenTrayForm()
-    if form.is_submitted():
-        xlist = ast.literal_eval('['+form.x_list.data.strip('[]')+']')
-        ylist = ast.literal_eval('['+form.y_list.data.strip('[]')+']')
-        depth = float(form.tray_depth.data)
-        wall = float(form.wall_thickness.data)
-        floor = float(form.floor_thickness.data)
-        round = float(form.floor_round.data)
-        tray_hash = generate_tray_hash(xlist, ylist, depth, wall, floor, round)
+    if form.validate_on_submit():
+        param_map = parse_form(form)
+        del(param_map['vol_mtrx_ml'])
+        tray_hash = generate_tray_hash(**param_map)
 
         # This is in the flask_serve directory, need to go up one level for the create script
         root_dir = os.path.dirname(THIS_SCRIPT_PATH)
         call_args = [
             sys.executable,  # the python interpreter running this script
             os.path.join(root_dir, 'generate_tray.py'),
-            f'[{",".join([str(x) for x in xlist])}]',
-            f'[{",".join([str(y) for y in ylist])}]',
-            '--depth', str(depth),
-            '--wall', str(wall),
-            '--floor', str(floor),
-            '--round', str(round),
+            f'[{",".join([str(x) for x in param_map["xlist"]])}]',
+            f'[{",".join([str(y) for y in param_map["ylist"]])}]',
+            '--depth', f'{param_map["depth"]}',
+            '--wall', f'{param_map["wall"]}',
+            '--floor', f'{param_map["floor"]}',
+            '--round', f'{param_map["round"]}',
             '--s3bucket', S3BUCKET,
             '--s3dir', tray_hash,
             '--yes'
         ]
+
+        if form.binary_mm_or_in != 'mm':
+            call_args += ['--inches']
+
         logging.info('Creating subprocess with:' + '|'.join(call_args))
 
         # Starts this process in the background and continues immediately
@@ -210,13 +235,20 @@ def download_status_wait(tray_hash):
                                tray_hash=tray_hash)
 
 
+    params = copy.deepcopy(dl_status['params'])
+    vol_mtrx = compute_volume_matrix(params['xlist'],
+                                     params['ylist'],
+                                     params['depth'],
+                                     params['round'],
+                                     params['units'])
+
     tmp_file = draw_tray(
-        dl_status['params']['xlist'],
-        dl_status['params']['ylist'],
-        dl_status['params']['wall'],
-        vol_mtrx_ml=None,
-        floor=dl_status['params']['floor'],
-        depth=dl_status['params']['depth'])
+        params['xlist'],
+        params['ylist'],
+        params['wall'],
+        vol_mtrx_ml=vol_mtrx,
+        floor=params['floor'],
+        depth=params['depth'])
 
     rawb64 = base64_encode_file(tmp_file)
 
@@ -245,7 +277,7 @@ def download_status_wait(tray_hash):
 
 
 @app.route('/about', methods=('GET',))
-def about():
+def about_page():
     return render_template('about.html')
 
 def flask_app():

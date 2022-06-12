@@ -45,7 +45,15 @@ def rescale_dims_for_display(
     return xlist_adj, ylist_adj, wall_size_adj
 
 
-def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, depth=None, floor=None, out_filename=None):
+def draw_tray(xlist,
+              ylist,
+              wall_size,
+              vol_mtrx_ml=None, # always in mL regardless of x/y/depth/etc units
+              depth=None,
+              floor=None,
+              units='mm',
+              out_filename=None):
+
     # Depth and floor args are provided just to be displayed, not used in computing the drawing
     fig, ax = plt.subplots(figsize=(12, 12))
 
@@ -64,20 +72,19 @@ def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, depth=None, floor=None,
     rect = Rectangle((x0, y0), x_total, y_total, linewidth=0, facecolor='#333333')
     ax.add_patch(rect)
     xoff, yoff = x0+wall_size_draw, y0+wall_size_draw
-    need_draw_y_labels = True
+
     for ix,x in enumerate(xlist_draw):
         for iy,y in enumerate(ylist_draw):
             rect = Rectangle((xoff, yoff), x, y, linewidth=0, facecolor='#8888cc')
             ax.add_patch(rect)
             
             if ix == 0:
-                y_txt = ylist[iy] # variable y is the draw size, not spec size
-                ax.text(x0-1,
-                        yoff + y/2,
-                        f'{y_txt:.1f} mm\n({y_txt/MM_PER_IN:.2f} in)',
-                        ha='right',
-                        va='center',
-                        size=12)
+                if units == 'mm':
+                    y_txt = f'{ylist[iy]:.1f} mm\n({ylist[iy] / MM_PER_IN:.2f} in)'
+                else:
+                    y_txt = f'{ylist[iy]:.2f} in\n({ylist[iy] * MM_PER_IN:.2f} mm)'
+
+                ax.text(x0-1, yoff + ylist[iy]/2, y_txt, ha='right', va='center', size=12)
                 
             if vol_mtrx_ml is not None:
                 vol_ml = int(vol_mtrx_ml[ix, iy])
@@ -94,27 +101,33 @@ def draw_tray(xlist, ylist, wall_size, vol_mtrx_ml=None, depth=None, floor=None,
             yoff += y + wall_size_draw
 
         # Draw x-label
-        x_txt = xlist[ix] # variable y is the draw size, not spec size
-        ax.text(xoff + x/2,
-                y0-1,
-                f'{x_txt:.2f} mm\n({x_txt/MM_PER_IN:.2f} in)',
-                ha='center',
-                va='top',
-                size=12)
+        if units == 'mm':
+            x_txt = f'{xlist[ix]:.1f} mm\n({xlist[ix] / MM_PER_IN:.2f} in)'
+        else:
+            x_txt = f'{xlist[ix]:.2f} in\n({xlist[ix] * MM_PER_IN:.2f} mm)'
+
+        ax.text(xoff + x/2, y0-1, x_txt, ha='center', va='top', size=12)
 
         # Reset y-position for drawing, increment x-position
         yoff = y0 + wall_size_draw
         xoff += x + wall_size_draw
         
     # Some summary text
-    disp_txt  = ''
-    disp_txt += f'Total Tray Size (mm): {x_total:.1f} mm x {y_total:.1f} mm'
-    disp_txt += f' ({x_total/MM_PER_IN:.2f} in x {y_total/MM_PER_IN:.2f} in)'
-    if None not in [depth, floor]:
-        disp_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} mm'
-        disp_txt += f' ({(depth + floor)/MM_PER_IN:.2f} in)'
-    ax.text(2, 1, disp_txt, size=12, ha='left', va='bottom')
-    
+    if units == 'mm':
+        total_size_txt  =  f'Total Tray Size: {x_total:.1f} mm x {y_total:.1f} mm'
+        total_size_txt +=  f' ({x_total / MM_PER_IN:.2f} in x {y_total / MM_PER_IN:.2f} in)'
+        if None not in [depth, floor]:
+            total_size_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} mm'
+            total_size_txt += f' ({(depth + floor)/MM_PER_IN:.2f} in)'
+    else:
+        total_size_txt  =  f'Total Tray Size: {x_total:.1f} in x {y_total:.1f} in'
+        total_size_txt +=  f' ({x_total * MM_PER_IN:.2f} mm x {y_total * MM_PER_IN:.2f} mm)'
+        if None not in [depth, floor]:
+            total_size_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} in'
+            total_size_txt += f' ({(depth + floor) * MM_PER_IN:.2f} mm)'
+
+    ax.text(2, 1, total_size_txt, size=12, ha='left', va='bottom')
+
     ax.set_xlim(0, x0+x_total+5)
     ax.set_ylim(0, y0+y_total+5)
     ax.set_aspect(1)

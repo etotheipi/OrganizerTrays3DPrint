@@ -3,8 +3,28 @@
 {% block content %}
     <h1>{% block title %} Generate Custom Organizer Tray (.stl) {% endblock %}</h1>
 
-    <form method="POST" action="/gentray">
+    <form method="POST" action="/traygen">
         {{ form.csrf_token }}
+        <p>
+            Use this page to run the tray-generation script on my AWS-hosted server.  The diagram
+            at the right explains what each variable does, and you can see a to-scale preview of
+            the tray before you actually generate the 3D model for printing.
+            You may also use this page solely to generate previews, then use the command provided
+            at the bottom of this page to run the script locally
+            (via <a href="https://hub.docker.com/r/etotheipi/3dprint-tray-gen"> my Docker image</a>
+            or vanilla Python3).
+        </p>
+        <p>
+            <em>This tool comes with no warranties and may produce complete garbage.  It's also
+            possible that this server has been DDoS'd and completely dysfunctional.  Good luck!</em>
+        </p>
+        <p>
+            The script and server code is all hosted in
+            <a href="https://github.com/etotheipi/OrganizerTrays3DPrint">my Github project</a>,
+            which includes instructions for running it locally, if that's your thing...
+        </p>
+        <hr>
+
         <img src="/static/dim_diagram.png" alt="Dimensional Diagram" style="width:600px" id="alignright">
         <p>
             {{ form.binary_mm_or_in.label }}

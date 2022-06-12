@@ -64,6 +64,8 @@ def LOG_IT(*strs):
     print(*sstrs)
     logging.info(' '.join(sstrs))
 
+MM_PER_IN = 25.4
+MM3_PER_CUP = 236.5882365
 
 xScale = 1.0
 yScale = 1.0
@@ -171,12 +173,12 @@ def compute_bin_volume(xsz, ysz, depth, round):
     # Now convert to both cups and mL (imperial and metric)
     totalVol_cm3  = totalVol_mm3 / 10**3
     totalVol_mL    = totalVol_cm3              # 1 cm3 == 1 mL  !
-    totalVol_cups = totalVol_mm3 / 236588.
+    totalVol_cups = totalVol_mm3 * 1000 / MM3_PER_CUP
 
     return [totalVol_mL, totalVol_cups]
 
 
-def generate_tray_hash(xlist, ylist, depth, wall, floor, round):
+def generate_tray_hash(xlist, ylist, depth, wall, floor, round, units='mm'):
     """
     This method generates a unique identifier for a given tray for the given version of this script
     (based on the version.txt file).  This allows us to generate a given tray one time, and then it
@@ -193,6 +195,7 @@ def generate_tray_hash(xlist, ylist, depth, wall, floor, round):
     to_hash.append(str(wall))
     to_hash.append(str(depth))
     to_hash.append(str(round))
+    to_hash.append(units)
 
     unique_str = '|'.join(to_hash).encode('utf-8')
     hash_str = sha256(unique_str).hexdigest()
@@ -201,7 +204,15 @@ def generate_tray_hash(xlist, ylist, depth, wall, floor, round):
     return hash_str
 
 
-def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15):
+def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15, units='mm'):
+    # We assume that all modeling software defaults to mm, so convert from inches if necessary
+    if units != 'mm':
+        xlist = [x/MM_PER_IN for x in xlist]
+        ylist = [y/MM_PER_IN for y in ylist]
+        depth = depth/MM_PER_IN
+        wall = wall/MM_PER_IN
+        floor = floor/MM_PER_IN
+        round = round/MM_PER_IN
 
     # Create all the slots to be subtracted from the frame of the tray.
     slots = [] 
@@ -349,8 +360,7 @@ if __name__=="__main__":
 
     LOG_IT(yaml.dump(args.__dict__, indent=2))
 
-    MM2IN = 25.4
-    RESCALE = MM2IN if args.unit_is_inches else 1.0
+    RESCALE = MM_PER_IN if args.unit_is_inches else 1.0
     
     # These are not set in the add_argument calls because we need to rescale
     # and don't know if they are use-supplied or default values.  
@@ -409,15 +419,15 @@ if __name__=="__main__":
     xszStrs = [str(int(x)) for x in xsizes]
     yszStrs = [str(int(y)) for y in ysizes]
     
-    LOG_IT(f'Depth: {depth:.1f} mm  / {depth/MM2IN:.2f} in')
-    LOG_IT(f'Wall:  {wall:.1f} mm   / {wall/MM2IN:.3f} in')
-    LOG_IT(f'Floor: {floor:.1f} mm  / {floor/MM2IN:.3f} in')
-    LOG_IT(f'Round: {round:.1f} mm / {round/MM2IN:.2f} in')
+    LOG_IT(f'Depth: {depth:.1f} mm  / {depth/MM_PER_IN:.2f} in')
+    LOG_IT(f'Wall:  {wall:.1f} mm   / {wall/MM_PER_IN:.3f} in')
+    LOG_IT(f'Floor: {floor:.1f} mm  / {floor/MM_PER_IN:.3f} in')
+    LOG_IT(f'Round: {round:.1f} mm / {round/MM_PER_IN:.2f} in')
 
     LOG_IT('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
     LOG_IT('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
-    LOG_IT('Widths:  [' + ', '.join([f'{x/MM2IN:.2f}' for x in xsizes]) + '] in')
-    LOG_IT('Heights: [' + ', '.join([f'{y/MM2IN:.2f}' for y in ysizes]) + '] in')
+    LOG_IT('Widths:  [' + ', '.join([f'{x/MM_PER_IN:.2f}' for x in xsizes]) + '] in')
+    LOG_IT('Heights: [' + ', '.join([f'{y/MM_PER_IN:.2f}' for y in ysizes]) + '] in')
 
     if fname is None:
         os.makedirs('output_trays', exist_ok=True)
@@ -438,7 +448,7 @@ if __name__=="__main__":
     # The next section is simply for printing useful info to the console
     ################################################################################
     LOG_IT(f'Tray size is: {twid:.2f}mm by {thgt:.2f}mm')
-    LOG_IT(f'Tray size is: {twid/MM2IN:.2f}in by {thgt/MM2IN:.2f}in')
+    LOG_IT(f'Tray size is: {twid/MM_PER_IN:.2f}in by {thgt/MM_PER_IN:.2f}in')
     
     # The diagram will be approximately 72 chars wide by 48 chars tall
     # Console letters are about 1.5 times taller than they are wide
@@ -497,9 +507,9 @@ if __name__=="__main__":
         sys.stdout.write(sizeStr.center(xchars[i]+1))
     sys.stdout.write('\n\n')
     
-    LOG_IT(f'Total Width  (with walls):  {twid:.2f} mm \t /  {twid/MM2IN:.2f} in')
-    LOG_IT(f'Total Height (with walls):  {thgt:.2f} mm \t /  {thgt/MM2IN:.2f} in')
-    LOG_IT(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM2IN:.2f} in')
+    LOG_IT(f'Total Width  (with walls):  {twid:.2f} mm \t /  {twid/MM_PER_IN:.2f} in')
+    LOG_IT(f'Total Height (with walls):  {thgt:.2f} mm \t /  {thgt/MM_PER_IN:.2f} in')
+    LOG_IT(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM_PER_IN:.2f} in')
     LOG_IT('')
 
     param_map = {
