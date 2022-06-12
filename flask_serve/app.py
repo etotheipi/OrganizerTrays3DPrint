@@ -16,7 +16,7 @@ import logging
 import subprocess
 import requests
 
-MM_PER_IN = 25.4
+from constants import *
 
 
 # If you want to hardcode specific AWS profile (in ~/.aws/config or ~/.aws/credentials), then
@@ -52,14 +52,17 @@ def validator_is_positive_numeric(form, field):
         raise ValidationError(errstr)
 
 def validator_xylist_check(form, field):
-    if any([c not in '[] ,0123456789' for c in field.data]):
+    if any([c not in '[] .,0123456789' for c in field.data]):
         errstr = 'Invalid input: must be comma-separated list of numeric bin sizes'
         logging.error(errstr)
         raise ValidationError(errstr)
 
     try:
         # Safely interpret the user input as a list, if it's valid
-        evaled = list(ast.literal_eval(field.data))
+        evaled = ast.literal_eval(field.data)
+        if isinstance(evaled, (float, int)):
+            return
+
         if not all([isinstance(v, (int, float)) for v in evaled]):
             raise
     except Exception as e:
@@ -207,7 +210,7 @@ def process_stl_request():
             '--yes'
         ]
 
-        if form.binary_mm_or_in != 'mm':
+        if form.binary_mm_or_in.data != 'mm':
             call_args += ['--inches']
 
         logging.info('Creating subprocess with:' + '|'.join(call_args))
@@ -248,7 +251,8 @@ def download_status_wait(tray_hash):
         params['wall'],
         vol_mtrx_ml=vol_mtrx,
         floor=params['floor'],
-        depth=params['depth'])
+        depth=params['depth'],
+        units=params['units'])
 
     rawb64 = base64_encode_file(tmp_file)
 
@@ -262,7 +266,7 @@ def download_status_wait(tray_hash):
                                tray_hash=tray_hash)
     elif dl_status['status'].lower() == 'complete':
         return render_template('download_stl.html',
-                               wait_for_download=True,
+                               wait_for_download=False,
                                is_complete=True,
                                preview_b64=rawb64,
                                message="Tray generation complete!  Use the download link below",

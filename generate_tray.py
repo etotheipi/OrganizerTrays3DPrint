@@ -54,6 +54,8 @@ import tempfile
 import yaml
 import logging
 
+# The constants file contains conversion constants and default size values
+from constants import *
 
 logging.basicConfig(filename='gentray_script.log', level=logging.INFO)
 logging.info('Starting generate script')
@@ -63,9 +65,6 @@ def LOG_IT(*strs):
     sstrs = [str(s) for s in strs]
     print(*sstrs)
     logging.info(' '.join(sstrs))
-
-MM_PER_IN = 25.4
-MM3_PER_CUP = 236.5882365
 
 xScale = 1.0
 yScale = 1.0
@@ -132,11 +131,9 @@ def create_subtract_slot(x_offset, y_offset, x_size, y_size, depth, floor, round
 ################################################################################
 def compute_bin_volume(xsz, ysz, depth, round):
     """
-    UPDATED:  Now we do this calculation exactly.  We compute the volume of the 
-    prism and then compute the volume of the hemisphere.  The hemisphere is 
-    complex because it's actually a hemisphere intersected with a square peg.  
+    INPUTS MUST BE IN MM
 
-    We do the volume calculation by computing the volume of the full hemisphere 
+    We do the volume calculation by computing the volume of the full hemisphere
     and then subtracting the volume of the four "spherical caps".    At once we
     have that, we scale the volume by both the y-scale and z-scale.
 
@@ -173,7 +170,7 @@ def compute_bin_volume(xsz, ysz, depth, round):
     # Now convert to both cups and mL (imperial and metric)
     totalVol_cm3  = totalVol_mm3 / 10**3
     totalVol_mL    = totalVol_cm3              # 1 cm3 == 1 mL  !
-    totalVol_cups = totalVol_mm3 * 1000 / MM3_PER_CUP
+    totalVol_cups = totalVol_mm3 / MM3_PER_CUP
 
     return [totalVol_mL, totalVol_cups]
 
@@ -204,15 +201,15 @@ def generate_tray_hash(xlist, ylist, depth, wall, floor, round, units='mm'):
     return hash_str
 
 
-def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15, units='mm'):
-    # We assume that all modeling software defaults to mm, so convert from inches if necessary
+def createTray(xlist, ylist, depth, wall, floor, round, units='mm'):
+    # Input can be mm or inches, but convert to mm before any calcs
     if units != 'mm':
-        xlist = [x/MM_PER_IN for x in xlist]
-        ylist = [y/MM_PER_IN for y in ylist]
-        depth = depth/MM_PER_IN
-        wall = wall/MM_PER_IN
-        floor = floor/MM_PER_IN
-        round = round/MM_PER_IN
+        xlist = [x*MM_PER_IN for x in xlist]
+        ylist = [y*MM_PER_IN for y in ylist]
+        depth = depth*MM_PER_IN
+        wall = wall*MM_PER_IN
+        floor = floor*MM_PER_IN
+        round = round*MM_PER_IN
 
     # Create all the slots to be subtracted from the frame of the tray.
     slots = [] 
@@ -237,7 +234,11 @@ def createTray(xlist, ylist, depth=28, wall=1.5, floor=1.5, round=15, units='mm'
     trayBasePrism = cube([totalWidth, totalHeight, floor+depth])
 
     # Finally, create the object and scale by the printer-calibration data
-    return [totalWidth, totalHeight, 
+    if units != 'mm':
+        totalWidth /= MM_PER_IN
+        totalHeight /= MM_PER_IN
+
+    return [totalWidth, totalHeight,
               scale([xScale, yScale, zScale]) \
               ( 
                   difference() \
@@ -360,34 +361,33 @@ if __name__=="__main__":
 
     LOG_IT(yaml.dump(args.__dict__, indent=2))
 
+    units = 'in' if args.unit_is_inches else 'mm'
     RESCALE = MM_PER_IN if args.unit_is_inches else 1.0
-    
+
     # These are not set in the add_argument calls because we need to rescale
     # and don't know if they are use-supplied or default values.  
     if args.depth is None:
-        args.depth = 32.0 / RESCALE
+        args.depth = DEFAULT_DEPTH_MM if units == 'mm' else DEFAULT_DEPTH_IN
 
     if args.wall is None:
-        args.wall = 1.8 / RESCALE
+        args.wall = DEFAULT_WALL_MM if units == 'mm' else DEFAULT_WALL_IN
 
     if args.floor is None:
-        args.floor = 1.8 / RESCALE
+        args.floor = DEFAULT_FLOOR_MM if units == 'mm' else DEFAULT_FLOOR_IN
 
     if args.round is None:
-        args.round = 12.0 / RESCALE
+        args.round = DEFAULT_ROUND_MM if units == 'mm' else DEFAULT_ROUND_IN
 
     if not args.hardcoded_params:
-        depth = args.depth * RESCALE
-        wall  = args.wall * RESCALE
-        floor = args.floor * RESCALE
-        round = args.round * RESCALE
+        depth = args.depth
+        wall  = args.wall
+        floor = args.floor
+        round = args.round
         fname = args.outfile
         try:
             size_args = ''.join(args.bin_sizes)
             size_args = size_args.replace(' ','').replace('][', '],[')
             xsizes, ysizes = literal_eval(size_args)
-            xsizes = [RESCALE * x for x in xsizes]
-            ysizes = [RESCALE * y for y in ysizes]
         except Exception as e:
             LOG_IT('Must provide sizes of bins as comma-separated list using square-brackets')
             LOG_IT('Example:')
@@ -395,14 +395,16 @@ if __name__=="__main__":
             exit(1)
     else:
         # HARDCODED PARAMETERS:  Modify values below and use --hardcoded-params
-        depth = 40
-        wall  = 1.5
-        floor = 1.5
-        round = 15
+        depth = 32
+        wall  = 1.8
+        floor = 1.8
+        round = 12
         xsizes = [30,45,60]
         ysizes = [50,50,50,50]
-    
-    if round > depth-3:
+        units = 'mm'
+
+    max_round_size = depth - (3 / RESCALE)
+    if round > max_round_size:
         LOG_IT( '***Warning:  round depth needs to be at least 3mm smaller than bin depth')
 
         if not args.skip_prompts:
@@ -414,20 +416,35 @@ if __name__=="__main__":
             LOG_IT( 'Aborting...')
             exit(1)
         else:
-            round = max(depth-3, 0)
+            round = max(max_round_size, 0)
 
-    xszStrs = [str(int(x)) for x in xsizes]
-    yszStrs = [str(int(y)) for y in ysizes]
-    
-    LOG_IT(f'Depth: {depth:.1f} mm  / {depth/MM_PER_IN:.2f} in')
-    LOG_IT(f'Wall:  {wall:.1f} mm   / {wall/MM_PER_IN:.3f} in')
-    LOG_IT(f'Floor: {floor:.1f} mm  / {floor/MM_PER_IN:.3f} in')
-    LOG_IT(f'Round: {round:.1f} mm / {round/MM_PER_IN:.2f} in')
+    if units == 'mm':
+        xszStrs = [str(int(x)) for x in xsizes]
+        yszStrs = [str(int(y)) for y in ysizes]
+    else:
+        xszStrs = [f'{x:.1f}' for x in xsizes]
+        yszStrs = [f'{y:.1f}' for y in ysizes]
 
-    LOG_IT('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
-    LOG_IT('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
-    LOG_IT('Widths:  [' + ', '.join([f'{x/MM_PER_IN:.2f}' for x in xsizes]) + '] in')
-    LOG_IT('Heights: [' + ', '.join([f'{y/MM_PER_IN:.2f}' for y in ysizes]) + '] in')
+    if units == 'mm':
+        LOG_IT(f'Depth: {depth:.1f} mm  / {depth/MM_PER_IN:.2f} in')
+        LOG_IT(f'Wall:  {wall:.1f} mm   / {wall/MM_PER_IN:.3f} in')
+        LOG_IT(f'Floor: {floor:.1f} mm  / {floor/MM_PER_IN:.3f} in')
+        LOG_IT(f'Round: {round:.1f} mm / {round/MM_PER_IN:.2f} in')
+
+        LOG_IT('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] mm')
+        LOG_IT('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] mm')
+        LOG_IT('Widths:  [' + ', '.join([f'{x/MM_PER_IN:.2f}' for x in xsizes]) + '] in')
+        LOG_IT('Heights: [' + ', '.join([f'{y/MM_PER_IN:.2f}' for y in ysizes]) + '] in')
+    else:
+        LOG_IT(f'Depth: {depth:.2f} in  / {depth*MM_PER_IN:.2f} mm')
+        LOG_IT(f'Wall:  {wall:.2f} in   / {wall*MM_PER_IN:.3f} mm')
+        LOG_IT(f'Floor: {floor:.2f} in  / {floor*MM_PER_IN:.3f} mm')
+        LOG_IT(f'Round: {round:.2f} in / {round*MM_PER_IN:.2f} mm')
+
+        LOG_IT('Widths:  [' + ', '.join([f'{x:.1f}' for x in xsizes]) + '] in')
+        LOG_IT('Heights: [' + ', '.join([f'{y:.1f}' for y in ysizes]) + '] in')
+        LOG_IT('Widths:  [' + ', '.join([f'{x*MM_PER_IN:.2f}' for x in xsizes]) + '] mm')
+        LOG_IT('Heights: [' + ', '.join([f'{y*MM_PER_IN:.2f}' for y in ysizes]) + '] mm')
 
     if fname is None:
         os.makedirs('output_trays', exist_ok=True)
@@ -441,15 +458,19 @@ if __name__=="__main__":
 
     # Now tell solid python to create the .scad file
     LOG_IT('Writing to OpenSCAD file:', fn_scad)
-    twid,thgt,trayObj = createTray(xsizes, ysizes, depth, wall, floor, round)
+    twid, thgt, trayObj = createTray(xsizes, ysizes, depth, wall, floor, round, units)
     scad_render_to_file(trayObj, fn_scad, file_header='$fn=64;')
 
     ################################################################################
     # The next section is simply for printing useful info to the console
     ################################################################################
-    LOG_IT(f'Tray size is: {twid:.2f}mm by {thgt:.2f}mm')
-    LOG_IT(f'Tray size is: {twid/MM_PER_IN:.2f}in by {thgt/MM_PER_IN:.2f}in')
-    
+    if units == 'mm':
+        LOG_IT(f'Tray size is: {twid:.1f}mm by {thgt:.1f}mm')
+        LOG_IT(f'Tray size is: {twid/MM_PER_IN:.2f}in by {thgt/MM_PER_IN:.2f}in')
+    else:
+        LOG_IT(f'Tray size is: {twid:.2f}in by {thgt:.2f}in')
+        LOG_IT(f'Tray size is: {twid*MM_PER_IN:.1f}mm by {thgt*MM_PER_IN:.1f}mm')
+
     # The diagram will be approximately 72 chars wide by 48 chars tall
     # Console letters are about 1.5 times taller than they are wide
     totalCharsWide = 82
@@ -487,7 +508,10 @@ if __name__=="__main__":
                 sys.stdout.write(' '*10 + '|')
     
             for i in range(len(xsizes)):
-                mL,cups = compute_bin_volume(xsizes[i], ysizes[revj], depth, round)
+                mL,cups = compute_bin_volume(RESCALE * xsizes[i],
+                                             RESCALE * ysizes[revj],
+                                             RESCALE * depth,
+                                             RESCALE * round)
         
                 if jc==yhgt//2-1:
                     sys.stdout.write(('%0.2f cups' % cups).center(xchars[i]))
@@ -506,11 +530,17 @@ if __name__=="__main__":
         sizeStr = '%0.1f mm' % xsizes[i]
         sys.stdout.write(sizeStr.center(xchars[i]+1))
     sys.stdout.write('\n\n')
-    
-    LOG_IT(f'Total Width  (with walls):  {twid:.2f} mm \t /  {twid/MM_PER_IN:.2f} in')
-    LOG_IT(f'Total Height (with walls):  {thgt:.2f} mm \t /  {thgt/MM_PER_IN:.2f} in')
-    LOG_IT(f'Total Depth  (with floor):  {depth+floor:.2f} mm \t /  {(depth+floor)/MM_PER_IN:.2f} in')
-    LOG_IT('')
+
+    if units == 'mm':
+        LOG_IT(f'Total Width  (with walls):  {twid:.1f} mm \t /  {twid/MM_PER_IN:.2f} in')
+        LOG_IT(f'Total Height (with walls):  {thgt:.1f} mm \t /  {thgt/MM_PER_IN:.2f} in')
+        LOG_IT(f'Total Depth  (with floor):  {depth+floor:.1f} mm \t /  {(depth+floor)/MM_PER_IN:.2f} in')
+        LOG_IT('')
+    else:
+        LOG_IT(f'Total Width  (with walls):  {twid:.2f} in \t /  {twid*MM_PER_IN:.1f} mm')
+        LOG_IT(f'Total Height (with walls):  {thgt:.2f} in \t /  {thgt*MM_PER_IN:.1f} mm')
+        LOG_IT(f'Total Depth  (with floor):  {depth+floor:.2f} in \t /  {(depth+floor)*MM_PER_IN:.1f} mm')
+        LOG_IT('')
 
     param_map = {
         'xlist': xsizes,
@@ -518,7 +548,8 @@ if __name__=="__main__":
         'depth': depth,
         'wall': wall,
         'floor': floor,
-        'round': round
+        'round': round,
+        'units': units
     }
 
     ################################################################################

@@ -4,9 +4,9 @@ import tempfile
 import matplotlib.pyplot as plt
 import base64
 from matplotlib.patches import Rectangle
+from constants import *
 
-MM_PER_IN = 25.4
-ML_PER_CUP = 236.588
+
 
 def rescale_dims_for_display(
     xlist,
@@ -113,15 +113,18 @@ def draw_tray(xlist,
         xoff += x + wall_size_draw
         
     # Some summary text
+    x_total_real = sum(xlist) + (len(xlist)+1) * wall_size
+    y_total_real = sum(ylist) + (len(ylist)+1) * wall_size
+
     if units == 'mm':
-        total_size_txt  =  f'Total Tray Size: {x_total:.1f} mm x {y_total:.1f} mm'
-        total_size_txt +=  f' ({x_total / MM_PER_IN:.2f} in x {y_total / MM_PER_IN:.2f} in)'
+        total_size_txt  =  f'Total Tray Size: {x_total_real:.1f} mm x {y_total_real:.1f} mm'
+        total_size_txt +=  f' ({x_total_real / MM_PER_IN:.2f} in x {y_total_real / MM_PER_IN:.2f} in)'
         if None not in [depth, floor]:
             total_size_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} mm'
             total_size_txt += f' ({(depth + floor)/MM_PER_IN:.2f} in)'
     else:
-        total_size_txt  =  f'Total Tray Size: {x_total:.1f} in x {y_total:.1f} in'
-        total_size_txt +=  f' ({x_total * MM_PER_IN:.2f} mm x {y_total * MM_PER_IN:.2f} mm)'
+        total_size_txt  =  f'Total Tray Size: {x_total_real:.1f} in x {y_total_real:.1f} in'
+        total_size_txt +=  f' ({x_total_real * MM_PER_IN:.2f} mm x {y_total_real * MM_PER_IN:.2f} mm)'
         if None not in [depth, floor]:
             total_size_txt += f'\nTotal Tray Height (depth+floor): {depth + floor:.1f} in'
             total_size_txt += f' ({(depth + floor) * MM_PER_IN:.2f} mm)'
